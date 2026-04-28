@@ -5,7 +5,7 @@ class InvertedIndex(BaseModel):
     vocab: dict[str, list[int]] = Field(default=dict())
 
     @classmethod
-    def build(cls, documents: list[tuple[str, str]]):
+    def build(cls, documents: list[tuple[str, str]]) -> dict[str, list[int]]:
         self = cls()
         word_docID = []
         # step 1: map
