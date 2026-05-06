@@ -1,3 +1,5 @@
+import json
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from langchain_postgres import PGVector
@@ -9,6 +11,8 @@ from rag_module.model.user_excercise_doc import UserExerciseDoc
 from langchain_huggingface import HuggingFaceEmbeddings
 from uvicorn import run
 from rag_module import model
+from tf_idf_module.tf_idf_vectorizer import TFIDFVectorizer
+from similarity_module.okapi_bm25 import Bm25Okapi
 from rag_module.util.database import engine, Model
 from dotenv import load_dotenv
 import os
@@ -21,6 +25,11 @@ COLLECTION_2 = COLLECTION_1
 
 def create_db_tables():
     Model.metadata.create_all(bind=engine)
+
+def get_documents(path: str = "data/Knowedge_base_RAG/exercises/exercises/exercises_vn.json"):
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.loads(f.read())
+    return [(d["id"], d["instructions"]["vi"]) for d in data]
 
 async def lifespan(app: FastAPI):
     create_db_tables()
@@ -35,6 +44,11 @@ async def lifespan(app: FastAPI):
             collection_name=COLLECTION_2,
             embeddings=app.state.embeddings,
         )
+    app.state.documents = get_documents()
+    app.state.tf_idf_vectorizer = TFIDFVectorizer()
+    app.state.tf_idf_vectorizer.fit(app.state.documents)
+    app.state.bm25 = Bm25Okapi()
+    app.state.bm25.fit(app.state.documents)
     yield
 
 app = FastAPI(lifespan=lifespan)

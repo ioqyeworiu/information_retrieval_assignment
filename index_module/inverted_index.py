@@ -2,10 +2,10 @@ from pydantic import BaseModel, Field
 
 
 class InvertedIndex(BaseModel):
-    vocab: dict[str, list[int]] = Field(default=dict())
+    vocab: dict[str, list[str]] = Field(default=dict())
 
     @classmethod
-    def build(cls, documents: list[tuple[str, str]]) -> dict[str, list[int]]:
+    def build(cls, documents: list[tuple[str, str]]) -> dict[str, list[str]]:
         self = cls()
         word_docID = []
         # step 1: map

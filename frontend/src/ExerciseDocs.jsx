@@ -7,6 +7,7 @@ function parseDocumentString(rawDoc) {
     const nameMatch = rawDoc.match(/name': '([^']+)'/)
     const imageMatch = rawDoc.match(/image': '([^']+)'/)
     const videoMatch = rawDoc.match(/video': '([^']+)'/)
+    const gifUrlMatch = rawDoc.match(/gif_url': '([^']+)'/)
     const categoryMatch = rawDoc.match(/category': '([^']+)'/)
     const bodyPartMatch = rawDoc.match(/body_part': '([^']+)'/)
     const equipmentMatch = rawDoc.match(/equipment': '([^']+)'/)
@@ -27,7 +28,7 @@ function parseDocumentString(rawDoc) {
             id: idMatch?.[1] || '',
             name: nameMatch?.[1] || '',
             image: imageMatch?.[1] || '',
-            video: videoMatch?.[1] || '',
+            video: videoMatch?.[1] || gifUrlMatch?.[1] || '',
             category: categoryMatch?.[1] || '',
             body_part: bodyPartMatch?.[1] || '',
             equipment: equipmentMatch?.[1] || '',
@@ -46,7 +47,7 @@ function normalizeExerciseDoc(rawDoc) {
         id: metadata.id || doc?.id || '',
         name: metadata.name || doc?.name || doc?.title || '',
         image: metadata.image || doc?.image || doc?.image_url || '',
-        video: metadata.video || doc?.video || '',
+        video: metadata.video || metadata.gif_url || doc?.video || doc?.gif_url || '',
         category: metadata.category || doc?.category || '',
         bodyPart: metadata.body_part || metadata.bodyPart || doc?.body_part || '',
         equipment: metadata.equipment || doc?.equipment || '',
@@ -127,24 +128,36 @@ function formatExerciseName(name) {
 export function ExerciseDocs({ onLogout, onOpenConsultation }) {
     const [exercises, setExercises] = useState([])
     const [isLoading, setIsLoading] = useState(false)
+    const [hasLoaded, setHasLoaded] = useState(false)
     const [errorMessage, setErrorMessage] = useState('')
     const [searchTerm, setSearchTerm] = useState('')
+    const [activeQuery, setActiveQuery] = useState('')
+    const [queryN, setQueryN] = useState('21')
+    const [similarityType, setSimilarityType] = useState('embedding')
 
     useEffect(() => {
         loadExercises()
     }, [])
 
-    async function loadExercises(searchQuery = '') {
+    async function loadExercises(searchQuery = '', options = {}) {
+        const resolvedQueryN = String(options.queryN || queryN)
+        const resolvedSimilarityType = options.similarityType || similarityType
+        const trimmedQuery = searchQuery.trim()
         setIsLoading(true)
         setErrorMessage('')
+        setActiveQuery(trimmedQuery)
 
         try {
-            const response = await authedFetch('/api/public/v1/excercise_docs', {
+            const queryString = new URLSearchParams({
+                similarity_type: resolvedSimilarityType,
+                query_n: resolvedQueryN,
+            }).toString()
+            const response = await authedFetch(`/api/public/v2/excercise_docs?${queryString}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(searchQuery.trim()),
+                body: JSON.stringify(trimmedQuery),
             })
 
             const payload = await response.json().catch(() => ({}))
@@ -162,6 +175,7 @@ export function ExerciseDocs({ onLogout, onOpenConsultation }) {
             setErrorMessage(error instanceof Error ? error.message : 'Lỗi không xác định')
         } finally {
             setIsLoading(false)
+            setHasLoaded(true)
         }
     }
 
@@ -181,6 +195,15 @@ export function ExerciseDocs({ onLogout, onOpenConsultation }) {
     function handleLogout() {
         clearAuthToken()
         onLogout()
+    }
+
+    function handleResetSearch() {
+        setSearchTerm('')
+        const defaultQueryN = '21'
+        const defaultSimilarityType = 'embedding'
+        setQueryN(defaultQueryN)
+        setSimilarityType(defaultSimilarityType)
+        loadExercises('', { queryN: defaultQueryN, similarityType: defaultSimilarityType })
     }
 
     return (
@@ -217,10 +240,49 @@ export function ExerciseDocs({ onLogout, onOpenConsultation }) {
                             placeholder="Nhập từ khóa và nhấn Enter hoặc bấm Tìm"
                         />
                     </label>
+                    <label className="search-field compact-search">
+                        <span>Similarity</span>
+                        <select
+                            value={similarityType}
+                            onChange={(e) => setSimilarityType(e.target.value)}
+                        >
+                            <option value="embedding">embedding</option>
+                            <option value="bm25">bm25</option>
+                            <option value="tf-idf">tf-idf</option>
+                        </select>
+                    </label>
+                    <label className="search-field compact-search">
+                        <span>Query N</span>
+                        <select
+                            value={queryN}
+                            onChange={(e) => setQueryN(e.target.value)}
+                        >
+                            <option value="10">10</option>
+                            <option value="21">21</option>
+                            <option value="30">30</option>
+                            <option value="50">50</option>
+                        </select>
+                    </label>
                     <button className="search-button" type="submit" disabled={!searchTerm.trim()}>
                         {isLoading ? 'Đang tìm...' : 'Tìm'}
                     </button>
                 </form>
+
+                <div className="results-toolbar">
+                    <p className="results-summary">
+                        {isLoading
+                            ? 'Đang tải dữ liệu bài tập...'
+                            : `${exercises.length} bài tập${activeQuery ? ` cho "${activeQuery}"` : ''} (${similarityType}, top ${queryN})`}
+                    </p>
+                    <button
+                        className="reset-search-button"
+                        type="button"
+                        onClick={handleResetSearch}
+                        disabled={isLoading || (!searchTerm && !activeQuery)}
+                    >
+                        Xóa lọc
+                    </button>
+                </div>
 
                 {errorMessage && (
                     <div className="error-box">
@@ -229,7 +291,18 @@ export function ExerciseDocs({ onLogout, onOpenConsultation }) {
                 )}
 
                 <div className="exercises-grid">
-                    {exercises.length > 0 ? (
+                    {isLoading ? (
+                        Array.from({ length: 6 }).map((_, idx) => (
+                            <article key={`exercise-skeleton-${idx}`} className="exercise-card skeleton-card">
+                                <div className="skeleton-line skeleton-title" />
+                                <div className="skeleton-line skeleton-chip" />
+                                <div className="skeleton-line" />
+                                <div className="skeleton-line" />
+                                <div className="skeleton-line skeleton-short" />
+                                <div className="skeleton-media" />
+                            </article>
+                        ))
+                    ) : exercises.length > 0 ? (
                         exercises.map((exercise, idx) => (
                             <article key={exercise.id || idx} className="exercise-card">
                                 <div className="exercise-header-card">
@@ -313,7 +386,7 @@ export function ExerciseDocs({ onLogout, onOpenConsultation }) {
                                 )}
                             </article>
                         ))
-                    ) : !isLoading ? (
+                    ) : hasLoaded ? (
                         <div className="no-results">
                             <p>Không có bài tập phù hợp từ kết quả API.</p>
                         </div>
